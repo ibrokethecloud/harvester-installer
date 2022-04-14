@@ -5,10 +5,12 @@ go 1.16
 require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/ghodss/yaml v1.0.0
+	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/imdario/mergo v0.3.12
 	github.com/insomniacslk/dhcp v0.0.0-20210827173440-b95caade3eac
 	github.com/jroimartin/gocui v0.4.0
 	github.com/mattn/go-shellwords v1.0.10 // indirect
+	github.com/minio/minio-go/v7 v7.0.24
 	github.com/mudler/yip v0.0.0-20211129144714-088f39125cf7
 	github.com/nsf/termbox-go v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1
@@ -17,8 +19,10 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/tredoe/osutil v1.3.6
 	github.com/vishvananda/netlink v1.1.0
+	github.com/willscott/go-nfs v0.0.0-20211118152618-00ba06574ea0
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/net v0.0.0-20210614182718-04defd469f4e
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
 	gopkg.in/ini.v1 v1.63.2
 	gopkg.in/yaml.v2 v2.4.0

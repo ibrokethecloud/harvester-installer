@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"github.com/harvester/harvester-installer/pkg/logcollector"
 	"io"
 	"io/ioutil"
 	"net"
@@ -448,6 +449,23 @@ func doInstall(g *gocui.Gui, hvstConfig *config.HarvesterConfig, webhooks Render
 	if err := execute(ctx, g, env, "/usr/sbin/harv-install"); err != nil {
 		webhooks.Handle(EventInstallFailed)
 		printToPanel(g, fmt.Sprintf(installFailureMessage, defaultLogFilePath), installPanel)
+		if hvstConfig.LogCollector.Enabled {
+			l := logcollector.NewLogCollector(ctx, &hvstConfig.LogCollector.UploadConfig)
+			details, err := l.GenerateSupportBundle()
+			if err != nil {
+				printToPanel(g, fmt.Sprintf("error during support bundle generation %v - %s", err, details.Output.String()), installPanel)
+			} else {
+				printToPanel(g, fmt.Sprintf("support bundle collected and available at %s", details.Name), installPanel)
+			}
+
+			if hvstConfig.LogCollector.UploadConfig.NFSConfig != nil || hvstConfig.LogCollector.UploadConfig.ObjectStoreConfig != nil {
+				err = l.UploadSupportBundle()
+				if err != nil {
+					printToPanel(g, fmt.Sprintf("error during upload of support bundle: %v", err), installPanel)
+				}
+			}
+		}
+
 		return err
 	}
 	webhooks.Handle(EventInstallSuceeded)

@@ -165,6 +165,31 @@ type HarvesterConfig struct {
 	MonitoringChartVersion string                    `json:"monitoringChartVersion,omitempty"`
 	SystemSettings         map[string]string         `json:"systemSettings,omitempty"`
 	ClusterNetworks        map[string]ClusterNetwork `json:"clusterNetworks,omitempty"`
+	LogCollector           LogCollector              `json:"logCollector,omitempty"`
+}
+
+type LogCollector struct {
+	Enabled      bool         `json:"enabled"`
+	UploadConfig UploadConfig `json:"uploadConfig,omitempty"`
+}
+
+type UploadConfig struct {
+	NFSConfig         *NFS         `json:"nfs,omitempty"`
+	ObjectStoreConfig *ObjectStore `json:"objectStore,omitempty"`
+}
+
+type NFS struct {
+	Endpoint string `json:"endpoint"`
+}
+
+type ObjectStore struct {
+	Endpoint        string `json:"endpoint"`
+	CACert          string `json:"caCert,omitempty"`
+	InsecureTLS     bool   `json:"insecureTLS,omitempty"`
+	AccessKeyID     string `json:"accessKeyID"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	SessionToken    string `json:"sessionToken,omitempty"`
+	BucketName      string `json:"bucketName"`
 }
 
 func NewHarvesterConfig() *HarvesterConfig {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/harvester/harvester-installer/pkg/util"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -437,4 +438,13 @@ func TestHarvesterConfigMerge_OtherField(t *testing.T) {
 	assert.Equal(t, map[string]string{"foo": "bar", "key": "val"}, conf.Labels, "Map field should be merged")
 	assert.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, conf.DNSNameservers, "Slice shoule be appended")
 	assert.Equal(t, "TokenValue", conf.Token, "New field should be added")
+}
+
+func TestLogCollector(t *testing.T) {
+	hc, err := LoadHarvesterConfig(util.LoadFixture(t, "harvester-config.yaml"))
+	assert.NoError(t, err)
+
+	assert.True(t, hc.LogCollector.Enabled, "expected logCollector to be enabled")
+	assert.NotNil(t, hc.LogCollector.UploadConfig.NFSConfig, "expected NFSConfig to be not nil")
+	assert.NotNil(t, hc.LogCollector.UploadConfig.ObjectStoreConfig, "expected ObjectStoreConfig to be not nil")
 }

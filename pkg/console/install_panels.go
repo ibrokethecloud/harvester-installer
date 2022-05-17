@@ -62,6 +62,11 @@ func (c *Console) layoutInstall(g *gocui.Gui) error {
 			if cfg.Install.Automatic && isFirstConsoleTTY() {
 				logrus.Info("Start automatic installation...")
 				c.config.Merge(cfg)
+				// ensures doInstall skips network config when using
+				// automatic install mode
+				if c.config.Install.Mode == config.ModeInstall {
+					installModeOnly = true
+				}
 				initPanel = installPanel
 			}
 		}
@@ -1617,6 +1622,12 @@ func addInstallPanel(c *Console) error {
 				c.config.Networks[key] = network
 			}
 
+			if c.config.Install.Mode == config.ModeInstall {
+				logrus.Info("mode matches config.ModeInstall")
+			} else {
+				logrus.Info("mode did not match config.ModeInstall")
+			}
+			logrus.Infof("found harvester.mode %s", c.config.Install.Mode)
 			if err := validateConfig(ConfigValidator{}, c.config); err != nil {
 				printToPanel(c.Gui, err.Error(), installPanel)
 				return

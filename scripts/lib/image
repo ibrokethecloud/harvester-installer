@@ -52,7 +52,7 @@ save_image()
 
   local archive_name="$(basename ${image_list%.txt}).tar"
   local archive_file="${save_dir}/${archive_name}"
-  xargs -n1 -t docker image pull --quiet < $image_list
+  #xargs -n1 -t docker image pull --quiet < $image_list
   docker image save -o $archive_file $(<${image_list})
   zstd --rm $archive_file
 

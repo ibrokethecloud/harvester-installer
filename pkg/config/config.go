@@ -119,7 +119,8 @@ type Install struct {
 	ForceMBR bool   `json:"forceMbr,omitempty"`
 	DataDisk string `json:"dataDisk,omitempty"`
 
-	Webhooks []Webhook `json:"webhooks,omitempty"`
+	Webhooks         []Webhook `json:"webhooks,omitempty"`
+	RawDiskImagePath string    `json:"rawDiskImagePath,omitempty"`
 }
 
 type Wifi struct {
@@ -152,9 +153,10 @@ type OS struct {
 
 type HarvesterConfig struct {
 	// Harvester will use scheme version to determine current version and migrate config to new scheme version
-	SchemeVersion          uint32 `json:"schemeVersion,omitempty"`
-	ServerURL              string `json:"serverUrl,omitempty"`
-	Token                  string `json:"token,omitempty"`
+	SchemeVersion uint32 `json:"schemeVersion,omitempty"`
+	ServerURL     string `json:"serverUrl,omitempty"`
+	Token         string `json:"token,omitempty"`
+
 	OS                     `json:"os,omitempty"`
 	Install                `json:"install,omitempty"`
 	RuntimeVersion         string            `json:"runtimeVersion,omitempty"`

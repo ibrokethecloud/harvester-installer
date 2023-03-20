@@ -36,9 +36,15 @@ EOF
 
 }
 
+reverse_consoles()
+{
+  for i in $(cat /sys/class/tty/console/active); do
+    echo $i
+  done | tac
+}
 
 # reverse the ttys to start from the last one
-for TTY in $(cat /sys/class/tty/console/active); do
+for TTY in $(reverse_consoles); do
   tty_num=${TTY#tty}
 
   # tty1 ~ tty64

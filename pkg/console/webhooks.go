@@ -36,7 +36,6 @@ const (
 	EventInstallStarted  = "STARTED"
 	EventInstallSuceeded = "SUCCEEDED"
 	EventInstallFailed   = "FAILED"
-	PasswordMask         = "******"
 )
 
 func IsValidEvent(event string) bool {
@@ -63,15 +62,8 @@ func IsValidHTTPMethod(method string) bool {
 	return util.StringSliceContains(methods, method)
 }
 
-func (p *RenderedWebhook) DebugOutput(format string) {
-	password := p.BasicAuth.Password
-	p.BasicAuth.Password = PasswordMask
-	logrus.Debugf(format, p)
-	p.BasicAuth.Password = password
-}
-
 func (p *RenderedWebhook) Handle() error {
-	p.DebugOutput("handle webhook: %+v")
+	logrus.Debugf("handle webhook: %+v", p)
 
 	doHTTPReq := func() error {
 		c := http.Client{
@@ -199,7 +191,7 @@ func prepareWebhook(h config.Webhook, context map[string]string) (*RenderedWebho
 }
 
 func PrepareWebhooks(hooks []config.Webhook, context map[string]string) (RendererWebhooks, error) {
-	result := make(RendererWebhooks, 0, len(hooks))
+	var result RendererWebhooks
 	for _, h := range hooks {
 		logrus.Debugf("preparing webhook %+v", h)
 		p, err := prepareWebhook(h, context)
@@ -209,8 +201,7 @@ func PrepareWebhooks(hooks []config.Webhook, context map[string]string) (Rendere
 			return nil, errors.New(msg)
 		}
 		p.Valid = true
-
-		p.DebugOutput("rendered webhook %+v")
+		logrus.Debugf("rendered webhook %+v", *p)
 		result = append(result, *p)
 	}
 	return result, nil

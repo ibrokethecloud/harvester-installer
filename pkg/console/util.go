@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jroimartin/gocui"
+	yipSchema "github.com/mudler/yip/pkg/schema"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
@@ -263,8 +264,8 @@ func getRemoteSSHKeys(url string) ([]string, error) {
 		return nil, err
 	}
 
+	var keys []string
 	lines := strings.Split(string(b), "\n")
-	keys := make([]string, 0, len(lines))
 	for i, line := range lines {
 		if line == "" {
 			continue
@@ -291,28 +292,28 @@ func getFormattedServerURL(addr string) (string, error) {
 	if !strings.HasPrefix(addr, https) {
 		realAddr = https + addr
 	}
-	parsedURL, err := url.ParseRequestURI(realAddr)
+	parsedUrl, err := url.ParseRequestURI(realAddr)
 	if err != nil {
 		return "", fmt.Errorf("%s is invalid", addr)
 	}
 
-	host := parsedURL.Hostname()
+	host := parsedUrl.Hostname()
 	if checkIP(host) != nil && checkDomain(host) != nil {
 		return "", fmt.Errorf("%s is not a valid ip/domain", addr)
 	}
 
-	if parsedURL.Path != "" {
-		return "", fmt.Errorf("path is not allowed in management address: %s", parsedURL.Path)
+	if parsedUrl.Path != "" {
+		return "", fmt.Errorf("path is not allowed in management address: %s", parsedUrl.Path)
 	}
 
-	port := parsedURL.Port()
+	port := parsedUrl.Port()
 	if port == "" {
-		parsedURL.Host += ":443"
+		parsedUrl.Host += ":443"
 	} else if port != "443" {
 		return "", fmt.Errorf("currently non-443 port are not allowed")
 	}
 
-	return parsedURL.String(), nil
+	return parsedUrl.String(), nil
 }
 
 func getServerURLFromRancherdConfig(data []byte) (string, error) {
@@ -458,14 +459,15 @@ func doInstall(g *gocui.Gui, hvstConfig *config.HarvesterConfig, webhooks Render
 	if err != nil {
 		return err
 	}
-	defer os.Remove(cosConfigFile)
+	//defer os.Remove(cosConfigFile)
 
 	hvstConfigFile, err := saveTemp(hvstConfig, "harvester")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(hvstConfigFile)
+	//defer os.Remove(hvstConfigFile)
 
+	userDataUrl := hvstConfig.Install.ConfigURL
 	hvstConfig.Install.ConfigURL = cosConfigFile
 	elementalConfig, err := config.ConvertToElementalConfig(hvstConfig)
 	if err != nil {
@@ -480,6 +482,10 @@ func doInstall(g *gocui.Gui, hvstConfig *config.HarvesterConfig, webhooks Render
 	env := append(os.Environ(), ev...)
 	env = append(env, fmt.Sprintf("HARVESTER_CONFIG=%s", hvstConfigFile))
 	env = append(env, fmt.Sprintf("HARVESTER_INSTALLATION_LOG=%s", defaultLogFilePath))
+	env = append(env, fmt.Sprintf("HARVESTER_STREAMDISK_CLOUDINIT_URL=%s", userDataUrl))
+	if hvstConfig.Install.Automatic && hvstConfig.Install.Mode == config.ModeInstall && hvstConfig.Install.RawDiskImagePath != "" {
+		return streamImageToDisk(ctx, g, env, *hvstConfig)
+	}
 
 	if hvstConfig.ShouldCreateDataPartitionOnOsDisk() {
 		// Use custom layout (which also creates Longhorn partition) when needed
@@ -499,6 +505,14 @@ func doInstall(g *gocui.Gui, hvstConfig *config.HarvesterConfig, webhooks Render
 	}
 	env = append(env, fmt.Sprintf("ELEMENTAL_CONFIG=%s", elementalConfigFile))
 	env = append(env, fmt.Sprintf("ELEMENTAL_CONFIG_DIR=%s", elementalConfigDir))
+
+	// Apply a dummy route to ensure rke2 can extract the images
+	if installModeOnly {
+		if err := applyDummyRoute(); err != nil {
+			printToPanel(g, fmt.Sprintf("error applying a fake default route during installOnlyMode: %v", err), installPanel)
+			return err
+		}
+	}
 
 	if err := execute(ctx, g, env, "/usr/sbin/harv-install"); err != nil {
 		webhooks.Handle(EventInstallFailed)
@@ -746,4 +760,159 @@ func executeSupportconfig(ctx context.Context, fileName string) error {
 	}
 
 	return cmd.Wait()
+}
+
+func configureInstalledNode(g *gocui.Gui, hvstConfig *config.HarvesterConfig, webhooks RendererWebhooks) error {
+	// copy cosConfigFile
+	// copy hvstConfigFile and break execution here
+	ctx := context.TODO()
+	webhooks.Handle(EventInstallStarted)
+
+	// skip rancherd and network config in the cos config
+	cosConfig, cosConfigFile, hvstConfigFile, err := generateTempConfigFiles(hvstConfig)
+	if err != nil {
+		printToPanel(g, err.Error(), installPanel)
+		return err
+	}
+
+	defer os.Remove(cosConfigFile)
+	defer os.Remove(hvstConfigFile)
+
+	err = applyRancherdConfig(ctx, g, hvstConfig, cosConfig)
+	if err != nil {
+		printToPanel(g, fmt.Sprintf("error applying rancherd config :%v", err), installPanel)
+		return err
+	}
+
+	err = restartCoreServices()
+	if err != nil {
+		printToPanel(g, fmt.Sprintf("error restarting core services: %v", err), installPanel)
+	}
+	return err
+}
+
+func apply(ctx context.Context, g *gocui.Gui, configFile string, stage string) error {
+	cmd := exec.CommandContext(ctx, "/usr/bin/yip", "-s", stage, configFile)
+	cmd.Env = os.Environ()
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	defer stderr.Close()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	defer stdout.Close()
+
+	var wg sync.WaitGroup
+	var writeLock sync.Mutex
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		printToPanelAndLog(g, installPanel, "[stderr]", stderr, &writeLock)
+	}()
+
+	go func() {
+		defer wg.Done()
+		printToPanelAndLog(g, installPanel, "[stdout]", stdout, &writeLock)
+	}()
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	wg.Wait()
+	return cmd.Wait()
+}
+
+func applyDummyRoute() error {
+	cmd := exec.Command("/usr/sbin/harv-dummy-iface")
+	_, err := cmd.Output()
+	return err
+}
+
+func restartCoreServices() error {
+	cmd := exec.Command("/usr/sbin/harv-restart-services")
+	_, err := cmd.Output()
+	return err
+}
+
+func applyRancherdConfig(ctx context.Context, g *gocui.Gui, hvstConfig *config.HarvesterConfig, cosConfig *yipSchema.YipConfig) error {
+
+	conf, err := config.GenerateRancherdConfig(hvstConfig)
+	if err != nil {
+		return err
+	}
+
+	for _, v := range conf.Stages["live"] {
+		cosConfig.Stages["initramfs"] = append(cosConfig.Stages["initramfs"], v)
+	}
+
+	// additional config to copy files over to persist the new changes
+	cosConfigFile, err := saveTemp(cosConfig, "cos")
+	if err != nil {
+		return err
+	}
+
+	hvstConfigFile, err := saveTemp(hvstConfig, "hvst")
+	if err != nil {
+		return err
+	}
+
+	copyFiles := yipSchema.Stage{
+		Name: "copy files",
+		Commands: []string{
+			fmt.Sprintf("cp %s /oem/99_custom.yaml", cosConfigFile),
+			fmt.Sprintf("cp %s /oem/harvester.config", hvstConfigFile),
+		},
+	}
+
+	conf.Stages["finalise"] = append(conf.Stages["finalise"], copyFiles)
+
+	liveCosConfig, err := saveTemp(conf, "live")
+	if err != nil {
+		return err
+	}
+	//defer os.Remove(liveCosConfig)
+
+	// apply live stage to configure node
+	err = apply(ctx, g, liveCosConfig, "live")
+	if err != nil {
+		return err
+	}
+
+	// apply finalise stage to copy contents
+	// this will persist content across reboots
+	return apply(ctx, g, liveCosConfig, "finalise")
+}
+
+func generateTempConfigFiles(hvstConfig *config.HarvesterConfig) (*yipSchema.YipConfig, string, string, error) {
+	cosConfig, err := config.ConvertToCOS(hvstConfig)
+	if err != nil {
+		return nil, "", "", err
+	}
+	cosConfigFile, err := saveTemp(cosConfig, "cos")
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	hvstConfigFile, err := saveTemp(hvstConfig, "harvester")
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	return cosConfig, cosConfigFile, hvstConfigFile, err
+}
+
+func streamImageToDisk(ctx context.Context, g *gocui.Gui, env []string, cfg config.HarvesterConfig) error {
+	printToPanel(g, fmt.Sprintf("streaming disk image %s to device %s", cfg.Install.RawDiskImagePath, cfg.Install.Device), installPanel)
+	if err := execute(ctx, g, env, "/usr/sbin/stream-disk"); err != nil {
+		printToPanel(g, fmt.Sprintf("stream to disk failed %v", err), installPanel)
+		return err
+	}
+
+	return execute(ctx, g, env, "/usr/sbin/cos-installer-shutdown")
 }

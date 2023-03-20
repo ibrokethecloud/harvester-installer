@@ -115,19 +115,25 @@ func ConvertToCOS(config *HarvesterConfig) (*yipSchema.YipConfig, error) {
 		TimeSyncd: make(map[string]string),
 	}
 
-	// TOP
-	if err := initRancherdStage(config, &initramfs); err != nil {
-		return nil, err
+	afterNetwork := yipSchema.Stage{
+		SSHKeys: make(map[string][]string),
 	}
+
+	initramfs.Users[cosLoginUser] = yipSchema.User{
+		PasswordHash: cfg.OS.Password,
+	}
+
+	initramfs.Modules = cfg.OS.Modules
+	initramfs.Sysctl = cfg.OS.Sysctls
+	initramfs.Environment = cfg.OS.Environment
 
 	// OS
 	for _, ff := range cfg.OS.WriteFiles {
-		perm, err := strconv.ParseUint(ff.RawFilePermissions, 8, 32)
+		perm, err := strconv.ParseUint(ff.RawFilePermissions, 8, 0)
 		if err != nil {
 			logrus.Warnf("fail to parse permission %s, use default permission.", err)
 			perm = 0600
 		}
-
 		initramfs.Files = append(initramfs.Files, yipSchema.File{
 			Path:        ff.Path,
 			Content:     ff.Content,
@@ -137,42 +143,33 @@ func ConvertToCOS(config *HarvesterConfig) (*yipSchema.YipConfig, error) {
 		})
 	}
 
-	initramfs.Hostname = cfg.OS.Hostname
-	initramfs.Sysctl = cfg.OS.Sysctls
-	if len(cfg.OS.NTPServers) > 0 {
-		initramfs.TimeSyncd["NTP"] = strings.Join(cfg.OS.NTPServers, " ")
-		initramfs.Systemctl.Enable = append(initramfs.Systemctl.Enable, ntpdService)
-		initramfs.Systemctl.Enable = append(initramfs.Systemctl.Enable, timeWaitSyncService)
-	}
-	if len(cfg.OS.DNSNameservers) > 0 {
-		initramfs.Commands = append(initramfs.Commands, getAddStaticDNSServersCmd(cfg.OS.DNSNameservers))
-	}
+	// TOP
+	if cfg.Mode != ModeInstall {
+		if err := initRancherdStage(config, &initramfs); err != nil {
+			return nil, err
+		}
 
-	if err := UpdateWifiConfig(&initramfs, cfg.OS.Wifi, false); err != nil {
-		return nil, err
-	}
+		initramfs.Hostname = cfg.OS.Hostname
 
-	initramfs.Users[cosLoginUser] = yipSchema.User{
-		PasswordHash: cfg.OS.Password,
-	}
+		if len(cfg.OS.NTPServers) > 0 {
+			initramfs.TimeSyncd["NTP"] = strings.Join(cfg.OS.NTPServers, " ")
+			initramfs.Systemctl.Enable = append(initramfs.Systemctl.Enable, ntpdService)
+		}
+		if len(cfg.OS.DNSNameservers) > 0 {
+			initramfs.Commands = append(initramfs.Commands, getAddStaticDNSServersCmd(cfg.OS.DNSNameservers))
+		}
 
-	initramfs.Environment = cfg.OS.Environment
+		if err := UpdateWifiConfig(&initramfs, cfg.OS.Wifi, false); err != nil {
+			return nil, err
+		}
 
-	// Use modprobe to load modules as a temporary solution
-	for _, module := range cfg.OS.Modules {
-		initramfs.Commands = append(initramfs.Commands, "modprobe "+module)
-	}
+		_, err = UpdateManagementInterfaceConfig(&initramfs, cfg.ManagementInterface, false)
+		if err != nil {
+			return nil, err
+		}
 
-	_, err = UpdateManagementInterfaceConfig(&initramfs, cfg.ManagementInterface, false)
-	if err != nil {
-		return nil, err
+		afterNetwork.SSHKeys[cosLoginUser] = cfg.OS.SSHAuthorizedKeys
 	}
-
-	// After network is available
-	afterNetwork := yipSchema.Stage{
-		SSHKeys: make(map[string][]string),
-	}
-	afterNetwork.SSHKeys[cosLoginUser] = cfg.OS.SSHAuthorizedKeys
 
 	cosConfig := &yipSchema.YipConfig{
 		Name: "Harvester Configuration",
@@ -240,15 +237,6 @@ func initRancherdStage(config *HarvesterConfig, stage *yipSchema.Stage) error {
 	)
 
 	if config.Install.Mode == "create" {
-		stage.Directories = append(stage.Directories,
-			yipSchema.Directory{
-				Path:        rancherdBootstrapDir,
-				Permissions: 0600,
-				Owner:       0,
-				Group:       0,
-			},
-		)
-
 		bootstrapResources, err := genBootstrapResources(config)
 		if err != nil {
 			return err
@@ -367,11 +355,11 @@ func SaveOriginalNetworkConfig() error {
 				return err
 			}
 			for _, path := range filepaths {
-				bytes, err := ioutil.ReadFile(path)
-				if err != nil {
+				if bytes, err := ioutil.ReadFile(path); err != nil {
 					return err
+				} else {
+					originalNetworkConfigs[filepath.Base(path)] = bytes
 				}
-				originalNetworkConfigs[filepath.Base(path)] = bytes
 			}
 			return nil
 		}
@@ -598,7 +586,7 @@ func UpdateWifiConfig(stage *yipSchema.Stage, wifis []Wifi, run bool) error {
 		return nil
 	}
 
-	interfaces := make([]string, len(wifis))
+	var interfaces []string
 	for i, wifi := range wifis {
 		iface := fmt.Sprintf("wlan%d", i)
 
@@ -673,7 +661,7 @@ func calcCosPersistentPartSize(diskSizeGiB uint64) (uint64, error) {
 	case diskSizeGiB < HardMinDiskSizeGiB:
 		return 0, fmt.Errorf("disk too small: %dGB. Minimum %dGB is required", diskSizeGiB, HardMinDiskSizeGiB)
 	case diskSizeGiB < SoftMinDiskSizeGiB:
-		d := MinCosPartSizeGiB / float64(SoftMinDiskSizeGiB-HardMinDiskSizeGiB)
+		var d float64 = MinCosPartSizeGiB / float64(SoftMinDiskSizeGiB-HardMinDiskSizeGiB)
 		partSizeGiB := MinCosPartSizeGiB + float64(diskSizeGiB-HardMinDiskSizeGiB)*d
 		return uint64(partSizeGiB), nil
 	default:
@@ -720,7 +708,7 @@ func CreateRootPartitioningLayout(elementalConfig *ElementalConfig, devPath stri
 	}
 
 	elementalConfig.Install.ExtraPartitions = []ElementalPartition{
-		{
+		ElementalPartition{
 			FilesystemLabel: "HARV_LH_DEFAULT",
 			Size:            0,
 			FS:              "ext4",
@@ -728,4 +716,53 @@ func CreateRootPartitioningLayout(elementalConfig *ElementalConfig, devPath stri
 	}
 
 	return elementalConfig, nil
+}
+
+func GenerateRancherdConfig(config *HarvesterConfig) (*yipSchema.YipConfig, error) {
+
+	runtimeConfig := yipSchema.Stage{
+		Users:            make(map[string]yipSchema.User),
+		TimeSyncd:        make(map[string]string),
+		SSHKeys:          make(map[string][]string),
+		Sysctl:           make(map[string]string),
+		Environment:      make(map[string]string),
+		SystemdFirstBoot: make(map[string]string),
+	}
+
+	runtimeConfig.Hostname = config.OS.Hostname
+	if len(config.OS.NTPServers) > 0 {
+		runtimeConfig.TimeSyncd["NTP"] = strings.Join(config.OS.NTPServers, " ")
+		runtimeConfig.Systemctl.Enable = append(runtimeConfig.Systemctl.Enable, ntpdService)
+	}
+	if len(config.OS.DNSNameservers) > 0 {
+		runtimeConfig.Commands = append(runtimeConfig.Commands, getAddStaticDNSServersCmd(config.OS.DNSNameservers))
+	}
+	err := initRancherdStage(config, &runtimeConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := UpdateWifiConfig(&runtimeConfig, config.OS.Wifi, true); err != nil {
+		return nil, err
+	}
+
+	if _, err := UpdateManagementInterfaceConfig(&runtimeConfig, config.ManagementInterface, true); err != nil {
+		return nil, err
+	}
+
+	runtimeConfig.SSHKeys[cosLoginUser] = config.OS.SSHAuthorizedKeys
+	runtimeConfig.Users[cosLoginUser] = yipSchema.User{
+		PasswordHash: config.OS.Password,
+	}
+
+	conf := &yipSchema.YipConfig{
+		Name: "RancherD Configuration",
+		Stages: map[string][]yipSchema.Stage{
+			"live": {
+				runtimeConfig,
+			},
+		},
+	}
+
+	return conf, nil
 }

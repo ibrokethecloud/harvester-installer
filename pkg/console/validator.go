@@ -155,12 +155,13 @@ func checkMTU(mtu int) error {
 	// Treat 0 as default value
 	if mtu == 0 {
 		return nil
+	} else {
+		// RFC 791
+		if mtu < 576 || mtu > 9000 {
+			return fmt.Errorf("%d is not a valid MTU value", mtu)
+		}
+		return nil
 	}
-	// RFC 791
-	if mtu < 576 || mtu > 9000 {
-		return fmt.Errorf("%d is not a valid MTU value", mtu)
-	}
-	return nil
 }
 
 func checkHwAddr(hwAddr string) error {
@@ -312,7 +313,7 @@ func (v ConfigValidator) Validate(cfg *config.HarvesterConfig) error {
 	// ref: https://github.com/kubernetes/kubernetes/blob/b15f788d29df34337fedc4d75efe5580c191cbf3/pkg/apis/core/validation/validation.go#L242-L245
 	if errs := validation.IsDNS1123Subdomain(cfg.OS.Hostname); len(errs) > 0 {
 		// TODO: show regexp for validation to users
-		return errors.Errorf("invalid hostname. A lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.'")
+		return errors.Errorf("Invalid hostname. A lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.'.")
 	}
 
 	if err := checkDevice(cfg.Install.Device); err != nil {
@@ -331,12 +332,18 @@ func (v ConfigValidator) Validate(cfg *config.HarvesterConfig) error {
 		}
 	}
 
-	if len(cfg.Install.ManagementInterface.Interfaces) == 0 {
-		return errors.Errorf(ErrMsgManagementInterfaceNotFound)
-	}
+	if cfg.Install.Mode != config.ModeInstall {
+		if len(cfg.Install.ManagementInterface.Interfaces) == 0 {
+			return errors.Errorf(ErrMsgManagementInterfaceNotFound)
+		}
 
-	if err := checkNetworks(cfg.Install.ManagementInterface, cfg.OS.DNSNameservers); err != nil {
-		return err
+		if err := checkNetworks(cfg.Install.ManagementInterface, cfg.OS.DNSNameservers); err != nil {
+			return err
+		}
+
+		if err := checkToken(cfg.Token); err != nil {
+			return err
+		}
 	}
 
 	if cfg.Install.Mode == config.ModeCreate {
@@ -353,10 +360,6 @@ func (v ConfigValidator) Validate(cfg *config.HarvesterConfig) error {
 		return err
 	}
 
-	if err := checkToken(cfg.Token); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -365,7 +368,7 @@ func commonCheck(cfg *config.HarvesterConfig) error {
 	switch mode := cfg.Install.Mode; mode {
 	case config.ModeUpgrade:
 		return nil
-	case config.ModeCreate:
+	case config.ModeCreate, config.ModeInstall:
 		if cfg.ServerURL != "" {
 			return errors.New(ErrMsgModeCreateContainsServerURL)
 		}
@@ -377,11 +380,11 @@ func commonCheck(cfg *config.HarvesterConfig) error {
 		return prettyError(ErrMsgModeUnknown, mode)
 	}
 
-	if cfg.Install.Automatic && cfg.Install.ISOURL == "" {
+	if !alreadyInstalled && cfg.Install.Mode != config.ModeInstall && cfg.Install.Automatic && cfg.Install.ISOURL == "" {
 		return errors.New(ErrMsgISOURLNotSpecified)
 	}
 
-	if cfg.Token == "" {
+	if cfg.Install.Mode != config.ModeInstall && cfg.Token == "" {
 		return errors.New(ErrMsgTokenNotSpecified)
 	}
 

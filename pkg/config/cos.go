@@ -33,7 +33,7 @@ const (
 	defaultReplicaCount                = 3
 	defaultGuaranteedEngineManagerCPU  = 12   // means percentage 12%
 	defaultGuaranteedReplicaManagerCPU = 12   // means percentage 12%
-	defaultSystemImageSize             = 3072 // size of /run/initramfs/cos-state/cOS/active.img in MB
+	defaultSystemImageSize             = 5120 // size of /run/initramfs/cos-state/cOS/active.img in MB
 )
 
 var (

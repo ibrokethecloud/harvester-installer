@@ -8,6 +8,11 @@ RUN chmod 0600 /system/oem/*
 
 COPY harvester-release.yaml /etc/
 
+RUN zypper ar http://download.opensuse.org/distribution/leap/15.4/repo/oss leap && \
+    zypper ar http://download.opensuse.org/update/leap/15.4/oss update_leap && \
+    zypper ar https://download.opensuse.org/update/leap/15.4/sle update_sle && \
+    zypper --gpg-auto-import-keys --non-interactive in  gawk gcc python kmod kernel-source make && \
+    zypper clean -a
 RUN mkinitrd
 
 ARG HARVESTER_PRETTY_NAME

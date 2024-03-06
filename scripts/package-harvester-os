@@ -226,4 +226,4 @@ for filename in $OUTPUT_DIR/*.txt; do
 done
 
 # Write image lists to a tarball "image-lists.tar.gz"
-tar zcvf $TOP_DIR/dist/artifacts/image-lists.tar.gz -C $TOP_DIR/dist/artifacts image-lists && rm -rf $OUTPUT_DIR
+tar zcvf $TOP_DIR/dist/artifacts/image-lists-${ARCH}.tar.gz -C $TOP_DIR/dist/artifacts image-lists && rm -rf $OUTPUT_DIR
